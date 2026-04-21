@@ -4,7 +4,7 @@ Real-time AR face replacement in the browser — powered by MediaPipe Face Mesh,
 
 Single HTML file. No build step. Just open it in a browser. Mobile browser better.
 
----
+**🎭 Try it live → https://thesammylab.github.io/tools/face-swap/**
 
 ![Face-swap demo](./bigreenface.jpg)
 
