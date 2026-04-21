@@ -1,0 +1,1564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>大绿脸 AR</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+html,body { width:100%; height:100%; overflow:hidden; background:#000; }
+#canvas { display:block; width:100vw; height:100dvh; touch-action:none; }
+#video  { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+
+/* ── Drawer ── */
+#ui { position:fixed; bottom:0; left:0; right:0; z-index:20;
+  transition:transform .35s cubic-bezier(.4,0,.2,1); }
+#ui.collapsed { transform:translateY(calc(100% - 52px)); }
+.ui-handle {
+  height:52px; background:rgba(0,0,0,.65);
+  backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
+  border-top:1px solid rgba(255,255,255,.07);
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 20px; cursor:pointer; gap:12px;
+}
+.handle-left { display:flex; align-items:center; gap:10px; }
+.sdot { width:9px; height:9px; border-radius:50%; background:#444; flex-shrink:0; transition:background .3s; }
+.sdot.ok  { background:#39ff14; box-shadow:0 0 8px #39ff14; }
+.sdot.rec { background:#ff3b3b; box-shadow:0 0 8px #ff3b3b; animation:bk 1s infinite; }
+@keyframes bk { 0%,100%{opacity:1} 50%{opacity:.3} }
+.slbl { font-family:-apple-system,'Helvetica Neue',sans-serif; font-size:.78rem; font-weight:600;
+  color:rgba(255,255,255,.7); letter-spacing:.4px; }
+.rtime { font-family:'Courier New',monospace; font-size:.78rem; font-weight:700; color:#ff3b3b; display:none; }
+.rtime.show { display:block; }
+.arr { font-size:1rem; color:rgba(255,255,255,.35); transition:transform .3s; }
+#ui:not(.collapsed) .arr { transform:rotate(180deg); }
+
+.ubody {
+  background:rgba(0,0,0,.86);
+  backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  padding:12px 16px 22px; display:flex; flex-direction:column; gap:10px;
+  max-height:74dvh; overflow-y:auto;
+}
+.sec { font-family:-apple-system,sans-serif; font-size:.65rem; font-weight:700;
+  letter-spacing:1.4px; text-transform:uppercase; color:rgba(255,255,255,.30); margin-bottom:-3px; }
+
+/* colors */
+.crow { display:flex; gap:7px; align-items:center; flex-wrap:wrap; }
+.sw { width:26px; height:26px; border-radius:50%; border:2px solid transparent; cursor:pointer;
+  transition:transform .15s,border-color .15s; flex-shrink:0; }
+.sw.on { border-color:#fff; transform:scale(1.18); }
+.sw:active { transform:scale(.88); }
+.cpw { width:26px; height:26px; border-radius:50%; border:2px dashed rgba(255,255,255,.22);
+  display:flex; align-items:center; justify-content:center; font-size:.75rem;
+  color:rgba(255,255,255,.38); cursor:pointer; position:relative; overflow:hidden; flex-shrink:0; }
+.cpw input { position:absolute; width:200%; height:200%; top:-50%; left:-50%; opacity:0; cursor:pointer; }
+
+/* sliders */
+.sg { display:flex; flex-direction:column; gap:4px; }
+.sr { display:flex; justify-content:space-between;
+  font-family:-apple-system,sans-serif; font-size:.70rem; color:rgba(255,255,255,.40); }
+.sr span:last-child { color:#fff; font-weight:700; }
+input[type=range] { -webkit-appearance:none; width:100%; height:3px;
+  border-radius:2px; background:rgba(255,255,255,.14); outline:none; }
+input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:18px; height:18px;
+  border-radius:50%; background:#39ff14; cursor:pointer; box-shadow:0 0 5px rgba(57,255,20,.45); }
+
+/* pos grid */
+.pgrid { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; }
+.pcell { display:flex; flex-direction:column; gap:3px; }
+.plbl { font-family:-apple-system,sans-serif; font-size:.58rem;
+  color:rgba(255,255,255,.35); text-align:center; }
+
+/* buttons */
+.brow { display:flex; gap:8px; }
+.btn { flex:1; min-width:0; padding:10px 6px; border-radius:12px; border:none;
+  font-family:-apple-system,'Helvetica Neue',sans-serif; font-size:.82rem; font-weight:700;
+  cursor:pointer; display:flex; align-items:center; justify-content:center; gap:5px; transition:all .18s; }
+.btn:active { transform:scale(.95); }
+.btn:disabled { opacity:.3; cursor:default; }
+.bcam { background:#39ff14; color:#000; }
+.brec { background:#ff3b3b; color:#fff; }
+.brec.stop { background:#222; color:#ff3b3b; border:1px solid #ff3b3b; }
+.bdl { background:rgba(255,255,255,.08); color:#fff; border:1px solid rgba(255,255,255,.12); }
+
+/* loading */
+#ld { position:fixed; inset:0; background:#4a7a00; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:18px; z-index:100; transition:opacity .5s; }
+#ld.gone { opacity:0; pointer-events:none; }
+.lem { font-size:5rem; animation:wob 2s ease-in-out infinite; }
+@keyframes wob { 0%,100%{transform:rotate(-5deg) scale(1)} 50%{transform:rotate(5deg) scale(1.06)} }
+.ltit { font-family:-apple-system,sans-serif; font-size:1.4rem; font-weight:900; color:#fff; letter-spacing:2px; }
+.lsub { font-family:-apple-system,sans-serif; font-size:.8rem; color:rgba(255,255,255,.58);
+  text-align:center; max-width:240px; line-height:1.5; }
+.lbw { width:200px; height:4px; background:rgba(255,255,255,.16); border-radius:2px; overflow:hidden; }
+.lbar { height:100%; background:#fff; border-radius:2px; width:0%; transition:width .3s; }
+
+/* drag hint */
+#dh { position:fixed; top:12px; left:50%; transform:translateX(-50%);
+  background:rgba(0,0,0,.72); color:#39ff14; padding:6px 14px; border-radius:20px;
+  font-family:-apple-system,sans-serif; font-size:.74rem; font-weight:700;
+  display:none; z-index:30; pointer-events:none; white-space:nowrap; }
+#dh.show { display:block; }
+
+.toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(30px);
+  background:rgba(0,0,0,.88); color:#fff; padding:8px 16px; border-radius:10px;
+  font-family:-apple-system,sans-serif; font-size:.79rem; font-weight:600;
+  opacity:0; transition:all .28s; pointer-events:none; white-space:nowrap; z-index:50; }
+.toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+
+/* person panel show/hide */
+.ppanel { display:none; flex-direction:column; gap:10px; }
+.ppanel.active { display:flex; }
+
+/* ── Feature Selector ── */
+.feat-sel { display:flex; flex-direction:column; gap:5px; }
+.feat-row { display:flex; align-items:center; gap:6px; height:34px; }
+.feat-icon { font-family:-apple-system,sans-serif; font-size:.70rem; font-weight:700;
+  color:rgba(255,255,255,.42); width:16px; text-align:center; flex-shrink:0; }
+.feat-name { font-family:-apple-system,sans-serif; font-size:.78rem; font-weight:700;
+  color:#fff; flex:1; text-align:center; }
+.feat-idx { font-family:'Courier New',monospace; font-size:.60rem;
+  color:rgba(255,255,255,.28); flex-shrink:0; width:22px; text-align:right; }
+.feat-btn { width:26px; height:26px; border-radius:7px; border:1px solid rgba(255,255,255,.16);
+  background:rgba(255,255,255,.07); color:rgba(255,255,255,.60); font-size:.78rem;
+  cursor:pointer; display:flex; align-items:center; justify-content:center;
+  flex-shrink:0; transition:all .14s; line-height:1; padding:0; }
+.feat-btn:active { background:rgba(255,255,255,.20); transform:scale(.84); }
+</style>
+</head>
+<body>
+
+<div id="ld">
+  <div class="lem">🟢</div>
+  <div class="ltit">大绿脸 AR</div>
+  <div class="lsub" id="ldMsg">正在加载 MediaPipe 模型…</div>
+  <div class="lbw"><div class="lbar" id="ldBar"></div></div>
+</div>
+
+<video id="video" playsinline autoplay muted></video>
+<canvas id="canvas"></canvas>
+<div id="dh">拖动五官可调整位置</div>
+
+<div id="ui" class="collapsed">
+  <div class="ui-handle" id="uiHandle">
+    <div class="handle-left">
+      <div class="sdot" id="sdot"></div>
+      <span class="slbl" id="slbl">等待开始</span>
+      <span class="rtime" id="rtime">⏺ 00:00</span>
+    </div>
+    <span class="arr">▲</span>
+  </div>
+  <div class="ubody">
+
+    <!-- Global bg color -->
+    <div class="sec">🎨 背景颜色</div>
+    <div class="crow" id="colorRow">
+      <div class="sw on" style="background:#4a7a00" data-c="#4a7a00"></div>
+      <div class="sw" style="background:#5a9e0a" data-c="#5a9e0a"></div>
+      <div class="sw" style="background:#3d6b2c" data-c="#3d6b2c"></div>
+      <div class="sw" style="background:#7cb518" data-c="#7cb518"></div>
+      <div class="sw" style="background:#2e8b57" data-c="#2e8b57"></div>
+      <div class="sw" style="background:#006994" data-c="#006994"></div>
+      <div class="sw" style="background:#8b4513" data-c="#8b4513"></div>
+      <div class="cpw">➕<input type="color" id="cpick" value="#4a7a00"></div>
+    </div>
+
+    <!-- Feature selector -->
+    <div class="sec">🎭 五官选择</div>
+    <div class="feat-sel">
+      <div class="feat-row">
+        <span class="feat-icon">眉</span>
+        <button class="feat-btn" id="browPrev">◀</button>
+        <span class="feat-name" id="browName">精致版</span>
+        <span class="feat-idx"  id="browIdx">1</span>
+        <button class="feat-btn" id="browNext">▶</button>
+      </div>
+      <div class="feat-row">
+        <span class="feat-icon">眼</span>
+        <button class="feat-btn" id="eyePrev">◀</button>
+        <span class="feat-name" id="eyeName">精致版</span>
+        <span class="feat-idx"  id="eyeIdx">1</span>
+        <button class="feat-btn" id="eyeNext">▶</button>
+      </div>
+      <div class="feat-row">
+        <span class="feat-icon">嘴</span>
+        <button class="feat-btn" id="mouthPrev">◀</button>
+        <span class="feat-name" id="mouthName">精致版</span>
+        <span class="feat-idx"  id="mouthIdx">1</span>
+        <button class="feat-btn" id="mouthNext">▶</button>
+      </div>
+    </div>
+
+    <!-- Person 0 panel -->
+    <div class="ppanel active" id="pp0">
+      <div class="sec">📐 大小</div>
+      <div class="sg"><div class="sr"><span>眉毛</span><span id="p0bszL">1.0x</span></div>
+        <input type="range" id="p0bszS" min="4" max="24" value="10"></div>
+      <div class="sg"><div class="sr"><span>眼睛</span><span id="p0eszL">1.0x</span></div>
+        <input type="range" id="p0eszS" min="4" max="28" value="12"></div>
+      <div class="sg"><div class="sr"><span>嘴巴</span><span id="p0mszL">1.0x</span></div>
+        <input type="range" id="p0mszS" min="4" max="24" value="10"></div>
+      <div class="sec">✋ 位置微调</div>
+      <div class="pgrid">
+        <div class="pcell"><div class="plbl">左眉X</div><input type="range" id="p0lbX" min="-30" max="30" value="0">
+          <div class="plbl">左眉Y</div><input type="range" id="p0lbY" min="-30" max="30" value="0"></div>
+        <div class="pcell"><div class="plbl">左眼X</div><input type="range" id="p0leX" min="-30" max="30" value="0">
+          <div class="plbl">左眼Y</div><input type="range" id="p0leY" min="-30" max="30" value="0"></div>
+        <div class="pcell"><div class="plbl">嘴巴X</div><input type="range" id="p0mX" min="-30" max="30" value="0">
+          <div class="plbl">嘴巴Y</div><input type="range" id="p0mY" min="-30" max="30" value="0"></div>
+        <div class="pcell"><div class="plbl">右眼X</div><input type="range" id="p0reX" min="-30" max="30" value="0">
+          <div class="plbl">右眼Y</div><input type="range" id="p0reY" min="-30" max="30" value="0"></div>
+        <div class="pcell"><div class="plbl">右眉X</div><input type="range" id="p0rbX" min="-30" max="30" value="0">
+          <div class="plbl">右眉Y</div><input type="range" id="p0rbY" min="-30" max="30" value="0"></div>
+      </div>
+      <button class="btn bdl" id="p0reset" style="padding:7px;">↺ 重置位置</button>
+    </div>
+
+    <!-- Record -->
+    <div class="sec">⏺ 录制</div>
+    <div class="brow"><button class="btn bcam" id="btnCam">📷 开启摄像头</button></div>
+    <div class="brow">
+      <button class="btn brec" id="btnRec" disabled>⏺ 录制</button>
+      <button class="btn bdl"  id="btnDl"  disabled>⬇️ 下载</button>
+      <button class="btn bdl"  id="btnDlV" disabled style="display:none"></button>
+    </div>
+
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════
+//  GLOBAL CONFIG
+// ═══════════════════════════════════════════════════════════════
+const GLOBAL = {
+  bgColor       : '#4a7a00',
+  EYE_BLINK_AMP : 1.50,
+  EYE_OPEN_AMP  : 1.40,
+  MOUTH_OPEN_AMP: 1.15,
+  BROW_RAISE_AMP: 1.70,
+  SMILE_AMP     : 1.20,
+  MOUTH_SMOOTH  : 0.72,
+};
+
+function makePersonCFG() {
+  return {
+    browScale : 1.0,
+    eyeScale  : 1.0,
+    mouthScale: 1.0,
+    lbOff: {x:0,y:0}, leOff: {x:0,y:0}, mOff:{x:0,y:0},
+    reOff: {x:0,y:0}, rbOff: {x:0,y:0},
+  };
+}
+const PCFG = [makePersonCFG(), makePersonCFG()];
+
+// ── Landmark indices ─────────────────────────────────────────────
+const L_IRIS=468, R_IRIS=473;
+const LE_RING=[33,160,159,158,133,153,145,144];
+const RE_RING=[263,387,386,385,362,380,374,373];
+const L_ETOP=159,L_EBOT=145,L_EOUT=33,L_EIN=133;
+const R_ETOP=386,R_EBOT=374,R_EOUT=263,R_EIN=362;
+const LB_CTR=107, RB_CTR=336;
+const M_RING=[61,40,0,270,291,321,17,91];
+const M_IN_TOP=13,M_IN_BOT=14,M_LEFT=61,M_RIGHT=291;
+const M_OTOP=0,M_OBOT=17;
+
+// ═══════════════════════════════════════════════════════════════
+//  FEATURE STYLE STATE  (0=none, 1=classic, 2=rough, 3-10=new)
+// ═══════════════════════════════════════════════════════════════
+const FEAT_NAMES = {
+  brow : ['无','精致版','手绘版','浓密粗眉','羽毛眉','八字眉','朋克锯齿眉','虚点眉','一字细眉','波浪眉','怒斜眉'],
+  eye  : ['无','精致版','手绘版','大圆眼','下垂眼','吊梢眼','眯眯眼','水汪汪','双眼皮','猫眼','布偶点眼'],
+  mouth: ['无','精致版','手绘版','猫嘴','嘟嘴','微笑嘴','下撇嘴','厚唇','龅牙嘴','心形嘴','鱼嘴'],
+};
+const STYLE = {
+  brow : parseInt(localStorage.getItem('facesel_brow')  ?? '1'),
+  eye  : parseInt(localStorage.getItem('facesel_eye')   ?? '1'),
+  mouth: parseInt(localStorage.getItem('facesel_mouth') ?? '1'),
+};
+
+function updateFeatUI() {
+  ['brow','eye','mouth'].forEach(k => {
+    const v = STYLE[k];
+    $$(`${k}Name`).textContent = FEAT_NAMES[k][v];
+    $$(`${k}Idx`).textContent  = v;
+  });
+}
+function stepStyle(feat, dir) {
+  STYLE[feat] = (STYLE[feat] + dir + 11) % 11;
+  localStorage.setItem(`facesel_${feat}`, STYLE[feat]);
+  updateFeatUI();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════════════
+const video  = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx    = canvas.getContext('2d');
+let W=0, H=0;
+let faceMesh=null, mpCam=null;
+let isStarted=false, isRecording=false;
+let mediaRecorder=null, recChunks=[], recStart=0, recTmr=null;
+let lastBlob=null, audioStream=null;
+let recCanvas=null, recCtx2=null, recPumpId=null;
+
+let smoothLM = [null, null];
+const SMOOTH = 0.48;
+let smoothMouthRing = [null, null];
+
+let earCal = [
+  {l:null,r:null,samples:0,sl:[],sr:[]},
+  {l:null,r:null,samples:0,sl:[],sr:[]},
+];
+const EAR_FRAMES=60, EAR_PCT=0.85;
+let mouthNeutral = [null, null];
+
+let drag=null, dragSX=0, dragSY=0, dragOS=null;
+let hitTargets = [];
+
+// ═══════════════════════════════════════════════════════════════
+//  RESIZE
+// ═══════════════════════════════════════════════════════════════
+function resize(){
+  W=canvas.width=window.innerWidth;
+  H=canvas.height=window.innerHeight;
+}
+window.addEventListener('resize',resize); resize();
+
+// ═══════════════════════════════════════════════════════════════
+//  MEDIAPIPE
+// ═══════════════════════════════════════════════════════════════
+async function initMP(){
+  ld(10,'加载核心模型…');
+  faceMesh=new FaceMesh({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${f}`});
+  faceMesh.setOptions({
+    maxNumFaces: 1,
+    refineLandmarks: true,
+    minDetectionConfidence:.5,
+    minTrackingConfidence:.5,
+  });
+  faceMesh.onResults(onResults);
+  ld(55,'预热模型…');
+  try{
+    const d=document.createElement('canvas'); d.width=d.height=64;
+    await faceMesh.send({image:d});
+  }catch(e){ console.warn('warmup skipped:',e); }
+  ld(100,'完成！');
+  setTimeout(()=>document.getElementById('ld').classList.add('gone'),500);
+}
+function ld(p,m){
+  document.getElementById('ldBar').style.width=p+'%';
+  document.getElementById('ldMsg').textContent=m;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  CAMERA
+// ═══════════════════════════════════════════════════════════════
+async function startCam(){
+  try{
+    const vs=await navigator.mediaDevices.getUserMedia(
+      {video:{facingMode:'user',width:{ideal:1280},height:{ideal:720}},audio:false});
+    try{ audioStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false}); }
+    catch(e){ console.warn('mic:',e); }
+    video.srcObject=vs;
+    await new Promise(r=>video.onloadedmetadata=r);
+    mpCam=new Camera(video,{
+      onFrame:async()=>{await faceMesh.send({image:video});},
+      width:video.videoWidth||640,height:video.videoHeight||480});
+    mpCam.start();
+    isStarted=true;
+    $$('btnCam').textContent='✅ 运行中'; $$('btnCam').disabled=true;
+    $$('btnRec').disabled=false;
+    setSt('追踪中','ok');
+    $$('ui').classList.add('collapsed');
+    toast('👀 摄像头已开启，对准脸部开始识别');
+  }catch(e){ toast('❌ 摄像头: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  SMOOTHING
+// ═══════════════════════════════════════════════════════════════
+function smLM(raw, pid){
+  if(!smoothLM[pid]){
+    smoothLM[pid]=raw.map(p=>({x:p.x,y:p.y,z:p.z}));
+    return smoothLM[pid];
+  }
+  for(let i=0;i<raw.length;i++){
+    smoothLM[pid][i].x=smoothLM[pid][i].x*SMOOTH+raw[i].x*(1-SMOOTH);
+    smoothLM[pid][i].y=smoothLM[pid][i].y*SMOOTH+raw[i].y*(1-SMOOTH);
+    smoothLM[pid][i].z=smoothLM[pid][i].z*SMOOTH+raw[i].z*(1-SMOOTH);
+  }
+  return smoothLM[pid];
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  HELPERS
+// ═══════════════════════════════════════════════════════════════
+function applyOff(p,o){return{x:p.x+o.x*W*0.01,y:p.y+o.y*H*0.01};}
+
+function EAR(pt,ti,bi,oi,ii){
+  const t=pt(ti),b=pt(bi),o=pt(oi),n=pt(ii);
+  return Math.hypot(o.x-n.x,o.y-n.y)>0
+    ?Math.hypot(t.x-b.x,t.y-b.y)/Math.hypot(o.x-n.x,o.y-n.y):0;
+}
+
+function catmull(ctx,pts){
+  const n=pts.length; if(n<2)return;
+  ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=0;i<n;i++){
+    const p0=pts[(i-1+n)%n],p1=pts[i],p2=pts[(i+1)%n],p3=pts[(i+2)%n];
+    ctx.bezierCurveTo(
+      p1.x+(p2.x-p0.x)/6,p1.y+(p2.y-p0.y)/6,
+      p2.x-(p3.x-p1.x)/6,p2.y-(p3.y-p1.y)/6,
+      p2.x,p2.y);
+  }
+  ctx.closePath();
+}
+
+// Deterministic rough ring — stable per frame, no shimmer
+function roughRing(cx, cy, rx, ry, n, wAmt, seed) {
+  const pts = [];
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2;
+    pts.push({
+      x: cx + Math.cos(a) * rx + Math.sin(i * 2.39 + seed)       * wAmt,
+      y: cy + Math.sin(a) * ry + Math.cos(i * 1.91 + seed + 0.5) * wAmt,
+    });
+  }
+  return pts;
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ADAPTIVE EAR
+// ═══════════════════════════════════════════════════════════════
+function getAdaptiveBlink(rawL, rawR, pid){
+  const c=earCal[pid];
+  if(c.samples<EAR_FRAMES){
+    c.sl.push(rawL); c.sr.push(rawR); c.samples++;
+    if(c.samples===EAR_FRAMES){
+      c.sl.sort((a,b)=>a-b); c.sr.sort((a,b)=>a-b);
+      const idx=Math.floor(EAR_FRAMES*EAR_PCT);
+      c.l=c.sl[idx]; c.r=c.sr[idx];
+    }
+    const fixedBaseline = 0.28;
+    const closed = fixedBaseline * 0.45;
+    const lB = Math.max(0, Math.min(1, (rawL - closed) / (fixedBaseline - closed)));
+    const rB = Math.max(0, Math.min(1, (rawR - closed) / (fixedBaseline - closed)));
+    const amp = b => b < 0.5
+      ? Math.max(0, b * (1/GLOBAL.EYE_BLINK_AMP))
+      : Math.min(1, 0.5 + (b-0.5) * GLOBAL.EYE_OPEN_AMP);
+    return {l: amp(lB), r: amp(rB)};
+  }
+  const closedL=c.l*0.45, closedR=c.r*0.45;
+  const lB=Math.max(0,Math.min(1,(rawL-closedL)/(c.l-closedL)));
+  const rB=Math.max(0,Math.min(1,(rawR-closedR)/(c.r-closedR)));
+  const amp=b=>b<0.5
+    ?Math.max(0,b*(1/GLOBAL.EYE_BLINK_AMP))
+    :Math.min(1,0.5+(b-0.5)*GLOBAL.EYE_OPEN_AMP);
+  return{l:amp(lB),r:amp(rB)};
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  MAIN RENDER
+// ═══════════════════════════════════════════════════════════════
+function onResults(results){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle=GLOBAL.bgColor;
+  ctx.fillRect(0,0,W,H);
+
+  const faces=results.multiFaceLandmarks;
+  if(!faces?.length){
+    setSt('未检测到人脸','');
+    drawDefault();
+    return;
+  }
+
+  setSt('追踪中','ok');
+  hitTargets=[];
+
+  const pid = 0;
+  const rawFace = faces[0];
+  {
+    const cfg=PCFG[pid];
+
+    if(!smoothLM[pid]){
+      earCal[pid]  = {l:null,r:null,samples:0,sl:[],sr:[]};
+      mouthNeutral[pid] = null;
+      smoothMouthRing[pid] = null;
+    }
+
+    const lm=smLM(rawFace, pid);
+    const pt=i=>({x:(1-lm[i].x)*W, y:lm[i].y*H});
+
+    const lEAR=EAR(pt,L_ETOP,L_EBOT,L_EOUT,L_EIN);
+    const rEAR=EAR(pt,R_ETOP,R_EBOT,R_EOUT,R_EIN);
+    const {l:lB,r:rB}=getAdaptiveBlink(lEAR,rEAR,pid);
+
+    const inT=pt(M_IN_TOP),inB=pt(M_IN_BOT);
+    const mL=pt(M_LEFT),mR=pt(M_RIGHT);
+    const innerGap=Math.hypot(inT.x-inB.x,inT.y-inB.y);
+    const mWidth=Math.hypot(mL.x-mR.x,mL.y-mR.y);
+    const rawMAR=mWidth>0?innerGap/mWidth:0;
+    const MAR=Math.min(rawMAR*GLOBAL.MOUTH_OPEN_AMP,0.80);
+
+    const midMY=(mL.y+mR.y)/2;
+    const rawSmile=((midMY-mL.y)+(midMY-mR.y))/(mWidth*0.3+1);
+    const smile=Math.max(-1,Math.min(1,rawSmile*GLOBAL.SMILE_AMP));
+
+    const faceH=Math.hypot(pt(10).x-pt(152).x,pt(10).y-pt(152).y)||H;
+    const lBrowCtr=applyOff(pt(LB_CTR),cfg.lbOff);
+    const rBrowCtr=applyOff(pt(RB_CTR),cfg.rbOff);
+    const lEyeMid={x:(pt(L_EOUT).x+pt(L_EIN).x)/2,y:(pt(L_ETOP).y+pt(L_EBOT).y)/2};
+    const rEyeMid={x:(pt(R_EOUT).x+pt(R_EIN).x)/2,y:(pt(R_ETOP).y+pt(R_EBOT).y)/2};
+    const lBrowGap=(lEyeMid.y-lBrowCtr.y)/faceH;
+    const rBrowGap=(rEyeMid.y-rBrowCtr.y)/faceH;
+    const NG=0.055;
+    const lRaise=Math.max(-0.5,Math.min(1,(lBrowGap-NG)/0.04*GLOBAL.BROW_RAISE_AMP));
+    const rRaise=Math.max(-0.5,Math.min(1,(rBrowGap-NG)/0.04*GLOBAL.BROW_RAISE_AMP));
+
+    const lIris=applyOff(pt(L_IRIS),cfg.leOff);
+    const rIris=applyOff(pt(R_IRIS),cfg.reOff);
+    const lRing=LE_RING.map(i=>applyOff(pt(i),cfg.leOff));
+    const rRing=RE_RING.map(i=>applyOff(pt(i),cfg.reOff));
+    const lEW=Math.hypot(pt(L_EOUT).x-pt(L_EIN).x,pt(L_EOUT).y-pt(L_EIN).y);
+    const rEW=Math.hypot(pt(R_EOUT).x-pt(R_EIN).x,pt(R_EOUT).y-pt(R_EIN).y);
+    const lER=lEW*0.62*cfg.eyeScale;
+    const rER=rEW*0.62*cfg.eyeScale;
+
+    const mRingRaw=M_RING.map(i=>applyOff(pt(i),cfg.mOff));
+    if(!smoothMouthRing[pid]){
+      smoothMouthRing[pid]=mRingRaw.map(p=>({x:p.x,y:p.y}));
+    } else {
+      const ms=GLOBAL.MOUTH_SMOOTH;
+      for(let i=0;i<mRingRaw.length;i++){
+        smoothMouthRing[pid][i].x=smoothMouthRing[pid][i].x*ms+mRingRaw[i].x*(1-ms);
+        smoothMouthRing[pid][i].y=smoothMouthRing[pid][i].y*ms+mRingRaw[i].y*(1-ms);
+      }
+    }
+    const mRing=smoothMouthRing[pid].map(p=>({...p}));
+    const mCtr=applyOff({x:(mL.x+mR.x)/2,y:(pt(M_OTOP).y+pt(M_OBOT).y)/2},cfg.mOff);
+
+    const eR=Math.max(lER,rER,28);
+    const mR2=Math.max(mWidth*0.55,38);
+    const bR=Math.max(lEW*0.5,24);
+    hitTargets.push(
+      {pid,part:'lb',cx:lBrowCtr.x,cy:lBrowCtr.y,r:bR, off:cfg.lbOff,ids:[`p${pid}lbX`,`p${pid}lbY`]},
+      {pid,part:'le',cx:lIris.x,   cy:lIris.y,   r:eR, off:cfg.leOff,ids:[`p${pid}leX`,`p${pid}leY`]},
+      {pid,part:'m', cx:mCtr.x,    cy:mCtr.y,    r:mR2,off:cfg.mOff, ids:[`p${pid}mX`, `p${pid}mY`]},
+      {pid,part:'re',cx:rIris.x,   cy:rIris.y,   r:eR, off:cfg.reOff,ids:[`p${pid}reX`,`p${pid}reY`]},
+      {pid,part:'rb',cx:rBrowCtr.x,cy:rBrowCtr.y,r:bR, off:cfg.rbOff,ids:[`p${pid}rbX`,`p${pid}rbY`]},
+    );
+
+    // ── Draw with feature library ──────────────────────────────
+    drawBrowStyle(STYLE.brow, ctx, lBrowCtr, lRaise, cfg.browScale, lEW);
+    drawBrowStyle(STYLE.brow, ctx, rBrowCtr, rRaise, cfg.browScale, rEW);
+    drawEyeStyle (STYLE.eye,  ctx, lIris, lRing, lER, lB);
+    drawEyeStyle (STYLE.eye,  ctx, rIris, rRing, rER, rB);
+    drawMouthStyle(STYLE.mouth,ctx,mCtr,mRing,mWidth,MAR,smile,cfg.mouthScale,pid);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DISPATCHERS
+// ═══════════════════════════════════════════════════════════════
+function drawBrowStyle(s,ctx,ctr,raise,scale,eyeW){
+  switch(s){
+    case 0: return;
+    case 1: return drawBrow1(ctx,ctr,raise,scale,eyeW);
+    case 2: return drawBrow2(ctx,ctr,raise,scale,eyeW);
+    case 3: return drawBrow3(ctx,ctr,raise,scale,eyeW);
+    case 4: return drawBrow4(ctx,ctr,raise,scale,eyeW);
+    case 5: return drawBrow5(ctx,ctr,raise,scale,eyeW);
+    case 6: return drawBrow6(ctx,ctr,raise,scale,eyeW);
+    case 7: return drawBrow7(ctx,ctr,raise,scale,eyeW);
+    case 8: return drawBrow8(ctx,ctr,raise,scale,eyeW);
+    case 9: return drawBrow9(ctx,ctr,raise,scale,eyeW);
+    case 10:return drawBrow10(ctx,ctr,raise,scale,eyeW);
+  }
+}
+function drawEyeStyle(s,ctx,centre,ring8,baseR,blink){
+  switch(s){
+    case 0: return;
+    case 1: return drawEye1(ctx,centre,ring8,baseR,blink);
+    case 2: return drawEye2(ctx,centre,ring8,baseR,blink);
+    case 3: return drawEye3(ctx,centre,ring8,baseR,blink);
+    case 4: return drawEye4(ctx,centre,ring8,baseR,blink);
+    case 5: return drawEye5(ctx,centre,ring8,baseR,blink);
+    case 6: return drawEye6(ctx,centre,ring8,baseR,blink);
+    case 7: return drawEye7(ctx,centre,ring8,baseR,blink);
+    case 8: return drawEye8(ctx,centre,ring8,baseR,blink);
+    case 9: return drawEye9(ctx,centre,ring8,baseR,blink);
+    case 10:return drawEye10(ctx,centre,ring8,baseR,blink);
+  }
+}
+function drawMouthStyle(s,ctx,centre,ring8,mwid,MAR,smile,scale,pid){
+  switch(s){
+    case 0: return;
+    case 1: return drawMouth1(ctx,centre,ring8,mwid,MAR,smile,scale,pid);
+    case 2: return drawMouth2(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 3: return drawMouth3(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 4: return drawMouth4(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 5: return drawMouth5(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 6: return drawMouth6(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 7: return drawMouth7(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 8: return drawMouth8(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 9: return drawMouth9(ctx,centre,ring8,mwid,MAR,smile,scale);
+    case 10:return drawMouth10(ctx,centre,ring8,mwid,MAR,smile,scale);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ── BROW STYLES 1-10 ──
+// ═══════════════════════════════════════════════════════════════
+
+// Style 1: Classic (original)
+function drawBrow1(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.70*scale;
+  const thick=Math.max(3,eyeW*0.17*scale);
+  const archH=Math.max(0, eyeW*(0.08+raise*0.13));
+  const tiltDY=eyeW*0.06;
+  const isLeft = ctr.x < W / 2;
+  const ly = isLeft ? -tiltDY :  tiltDY;
+  const ry = isLeft ?  tiltDY : -tiltDY;
+  const lx=-halfW, rx=halfW, py=-archH;
+  const cp1x=(lx+0)/2, cp1y=(ly+py)/2-archH*0.3;
+  const cp2x=(0+rx)/2, cp2y=(py+ry)/2-archH*0.3;
+  ctx.save();
+  ctx.translate(ctr.x,ctr.y);
+  ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#111111';
+  ctx.lineWidth=thick; ctx.globalAlpha=1;
+  ctx.beginPath(); ctx.moveTo(lx,ly);
+  ctx.bezierCurveTo(cp1x,cp1y,cp2x,cp2y,rx,ry); ctx.stroke();
+  ctx.lineWidth=thick*0.55; ctx.globalAlpha=0.38;
+  const sd = isLeft ? 1.1 : 2.2;
+  const jx=Math.sin(sd*7.3)*1.8, jy=Math.cos(sd*5.1)*1.8;
+  ctx.beginPath(); ctx.moveTo(lx+jx,ly+jy);
+  ctx.bezierCurveTo(cp1x+jx,cp1y+jy,cp2x+jx,cp2y+jy,rx+jx,ry+jy); ctx.stroke();
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// Style 2: 手绘版 — thick marker stroke, jitter edges, pure fill feel
+function drawBrow2(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.72*scale;
+  const thick=Math.max(8,eyeW*0.30*scale);
+  const archH=Math.max(0,eyeW*(0.07+raise*0.13));
+  const tiltDY=eyeW*0.055;
+  const isLeft=ctr.x<W/2;
+  const sd=isLeft?1.3:3.7;
+  const ly=isLeft?-tiltDY: tiltDY;
+  const ry=isLeft? tiltDY:-tiltDY;
+  const lx=-halfW, rx=halfW, py=-archH;
+  const cp1x=lx*0.4, cp1y=(ly+py)*0.5-archH*0.25;
+  const cp2x=rx*0.4, cp2y=(py+ry)*0.5-archH*0.25;
+
+  // Generate N sample points along the cubic bezier with stable jitter
+  const N=10;
+  const pts=[];
+  for(let i=0;i<=N;i++){
+    const t=i/N;
+    const u=1-t;
+    const x=u*u*u*lx+3*u*u*t*cp1x+3*u*t*t*cp2x+t*t*t*rx;
+    const y=u*u*u*ly+3*u*u*t*cp1y+3*u*t*t*cp2y+t*t*t*ry;
+    pts.push({
+      x:x+Math.sin(i*3.7+sd)*2.2,
+      y:y+Math.cos(i*2.9+sd)*2.2,
+    });
+  }
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.strokeStyle='#0a0a0a'; ctx.lineWidth=thick;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.stroke();
+  // second thinner offset pass for depth
+  ctx.lineWidth=thick*0.45; ctx.globalAlpha=0.30;
+  ctx.beginPath(); ctx.moveTo(pts[0].x+1.5,pts[0].y+1);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x+1.5,pts[i].y+1);
+  ctx.stroke();
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// Style 3: 浓密粗眉 — very thick, triple parallel strokes
+function drawBrow3(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.70*scale;
+  const thick=Math.max(9,eyeW*0.34*scale);
+  const archH=Math.max(0,eyeW*(0.07+raise*0.12));
+  const tiltDY=eyeW*0.055;
+  const isLeft=ctr.x<W/2;
+  const ly=isLeft?-tiltDY: tiltDY;
+  const ry=isLeft? tiltDY:-tiltDY;
+  const lx=-halfW,rx=halfW,py=-archH;
+  const cp1x=lx*0.4,cp1y=(ly+py)*0.5-archH*0.3;
+  const cp2x=rx*0.4,cp2y=(py+ry)*0.5-archH*0.3;
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  const passes=[
+    {offY:-thick*0.38,lw:thick*0.65,alpha:0.55},
+    {offY:0,          lw:thick,     alpha:1.00},
+    {offY: thick*0.38,lw:thick*0.55,alpha:0.45},
+  ];
+  for(const p of passes){
+    ctx.globalAlpha=p.alpha; ctx.lineWidth=p.lw; ctx.strokeStyle='#0a0a0a';
+    ctx.beginPath();
+    ctx.moveTo(lx,ly+p.offY);
+    ctx.bezierCurveTo(cp1x,cp1y+p.offY,cp2x,cp2y+p.offY,rx,ry+p.offY);
+    ctx.stroke();
+  }
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// Style 4: 羽毛眉 — many short diagonal hair strokes
+function drawBrow4(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.68*scale;
+  const archH=Math.max(0,eyeW*(0.05+raise*0.10));
+  const tiltDY=eyeW*0.05;
+  const isLeft=ctr.x<W/2;
+  const N=16;
+  const strokeLen=Math.max(4,eyeW*0.20*scale);
+  const strokeW=Math.max(1.2,eyeW*0.050*scale);
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.strokeStyle='#0a0a0a'; ctx.lineCap='round';
+
+  for(let i=0;i<N;i++){
+    const t=i/(N-1);
+    const x=-halfW+halfW*2*t;
+    const sinePeak=Math.sin(t*Math.PI);
+    const y=-archH*sinePeak+(isLeft?tiltDY*(1-t*2):-tiltDY*(1-t*2));
+    // Hair strokes angle from root upward-outward
+    const ang=-0.45+sinePeak*0.25+Math.sin(i*2.3)*0.10;
+    ctx.lineWidth=strokeW*(0.6+Math.sin(i*1.9)*0.4);
+    ctx.globalAlpha=0.65+Math.sin(i*2.1)*0.35;
+    ctx.beginPath();
+    ctx.moveTo(x-Math.cos(ang)*strokeLen*0.3, y-Math.sin(ang)*strokeLen*0.3);
+    ctx.lineTo(x+Math.cos(ang)*strokeLen*0.7, y+Math.sin(ang)*strokeLen*0.7);
+    ctx.stroke();
+  }
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// Style 5: 八字忧郁眉 — inner corner high, outer corner drops (sad)
+function drawBrow5(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.70*scale;
+  const thick=Math.max(3,eyeW*0.16*scale);
+  const isLeft=ctr.x<W/2;
+  const innerY=-eyeW*(0.10+raise*0.06);
+  const outerY= eyeW*0.07;
+  const lx=-halfW, rx=halfW;
+  // left eye: left side = outer, right side = inner
+  const ly=isLeft?outerY:innerY;
+  const ry=isLeft?innerY:outerY;
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.strokeStyle='#111'; ctx.lineWidth=thick; ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(lx,ly);
+  ctx.bezierCurveTo(lx/2,(ly+ry)*0.4+eyeW*0.05,rx/2,(ly+ry)*0.4,rx,ry);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// Style 6: 锯齿朋克眉 — jagged zigzag
+function drawBrow6(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.68*scale;
+  const thick=Math.max(2.5,eyeW*0.13*scale);
+  const archH=Math.max(0,eyeW*(0.06+raise*0.10));
+  const tiltDY=eyeW*0.05;
+  const isLeft=ctr.x<W/2;
+  const N=8;
+  const zigAmp=eyeW*0.065*scale;
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.strokeStyle='#0a0a0a'; ctx.lineWidth=thick;
+  ctx.lineCap='round'; ctx.lineJoin='miter';
+  ctx.beginPath();
+  for(let i=0;i<=N;i++){
+    const t=i/N;
+    const x=-halfW+halfW*2*t;
+    const baseY=-archH*Math.sin(t*Math.PI)+(isLeft?tiltDY*(1-t*2):-tiltDY*(1-t*2));
+    const zig=(i%2===0?-1:1)*zigAmp;
+    if(i===0) ctx.moveTo(x,baseY+zig); else ctx.lineTo(x,baseY+zig);
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+// Style 7: 虚点眉 — row of dots
+function drawBrow7(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.66*scale;
+  const archH=Math.max(0,eyeW*(0.06+raise*0.10));
+  const tiltDY=eyeW*0.05;
+  const isLeft=ctr.x<W/2;
+  const dotR=Math.max(1.8,eyeW*0.060*scale);
+  const N=10;
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.fillStyle='#0a0a0a';
+  for(let i=0;i<N;i++){
+    const t=i/(N-1);
+    const x=-halfW+halfW*2*t;
+    const y=-archH*Math.sin(t*Math.PI)+(isLeft?tiltDY*(1-t*2):-tiltDY*(1-t*2));
+    const r=dotR*(0.65+Math.sin(i*2.1+1.3)*0.35);
+    ctx.beginPath(); ctx.ellipse(x,y,r,r*1.3,0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 8: 极细一字平眉 — ultra-thin flat line
+function drawBrow8(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.58*scale;
+  const thick=Math.max(1.5,eyeW*0.062*scale);
+  const raiseDY=-eyeW*0.025*Math.max(0,raise);
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.strokeStyle='#0a0a0a'; ctx.lineWidth=thick; ctx.lineCap='round';
+  ctx.beginPath();
+  ctx.moveTo(-halfW,raiseDY); ctx.lineTo(halfW,raiseDY);
+  ctx.stroke(); ctx.restore();
+}
+
+// Style 9: 波浪眉 — sinusoidal wave brow
+function drawBrow9(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.68*scale;
+  const thick=Math.max(2.5,eyeW*0.13*scale);
+  const archH=Math.max(0,eyeW*(0.04+raise*0.08));
+  const waveH=eyeW*0.058*scale;
+  const tiltDY=eyeW*0.04;
+  const isLeft=ctr.x<W/2;
+  const N=24;
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.strokeStyle='#111'; ctx.lineWidth=thick;
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath();
+  for(let i=0;i<=N;i++){
+    const t=i/N;
+    const x=-halfW+halfW*2*t;
+    const baseY=-archH*Math.sin(t*Math.PI)+(isLeft?tiltDY*(1-t*2):-tiltDY*(1-t*2));
+    const y=baseY+Math.sin(t*Math.PI*3.5)*waveH;
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+// Style 10: 漫画怒斜眉 — sharp angry diagonal + shadow line
+function drawBrow10(ctx,ctr,raise,scale,eyeW){
+  const halfW=eyeW*0.65*scale;
+  const thick=Math.max(4.5,eyeW*0.22*scale);
+  const isLeft=ctr.x<W/2;
+  const innerY=-eyeW*(0.17+raise*0.08);
+  const outerY=-eyeW*0.01;
+  const lx=-halfW,rx=halfW;
+  const ly=isLeft?outerY:innerY;
+  const ry=isLeft?innerY:outerY;
+
+  ctx.save(); ctx.translate(ctr.x,ctr.y);
+  ctx.strokeStyle='#0a0a0a'; ctx.lineWidth=thick; ctx.lineCap='butt';
+  ctx.beginPath(); ctx.moveTo(lx,ly); ctx.lineTo(rx,ry); ctx.stroke();
+  ctx.lineWidth=thick*0.38; ctx.globalAlpha=0.45;
+  ctx.beginPath(); ctx.moveTo(lx,ly+thick*0.55); ctx.lineTo(rx,ry+thick*0.55); ctx.stroke();
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ── EYE STYLES 1-10 ──
+// ═══════════════════════════════════════════════════════════════
+
+// Style 1: Classic — organic blob from ring8 + outline
+function drawEye1(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const minRy=Math.max(1.5,baseR*0.06);
+  const rcx=ring8.reduce((s,p)=>s+p.x,0)/8;
+  const rcy=ring8.reduce((s,p)=>s+p.y,0)/8;
+  const rrx=ring8.reduce((mx,p)=>Math.max(mx,Math.abs(p.x-rcx)),1);
+  const rry=ring8.reduce((mx,p)=>Math.max(mx,Math.abs(p.y-rcy)),1);
+  const pts=ring8.map(p=>({
+    x:centre.x+(p.x-rcx)/rrx*baseR,
+    y:centre.y+(p.y-rcy)/rry*(minRy+(baseR-minRy)*blinkCurved),
+  }));
+  ctx.save();
+  ctx.beginPath(); catmull(ctx,pts);
+  ctx.fillStyle='#111111'; ctx.fill();
+  ctx.strokeStyle='#0d0d0d';
+  ctx.lineWidth=Math.max(2.5,baseR*0.13);
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.beginPath(); catmull(ctx,pts); ctx.stroke();
+  ctx.lineWidth=Math.max(1.2,baseR*0.065); ctx.globalAlpha=0.30;
+  const pts2=pts.map((p,i)=>({x:p.x+Math.sin(i*1.7)*1.6,y:p.y+Math.cos(i*2.3)*1.1}));
+  ctx.beginPath(); catmull(ctx,pts2); ctx.stroke();
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// Style 2: 手绘版 — solid filled jitter ellipse, NO stroke
+function drawEye2(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const minRy=Math.max(1.5,baseR*0.06);
+  const openY=minRy+(baseR-minRy)*blinkCurved;
+  const isLeft=centre.x<W/2;
+  const sd=isLeft?3.14:6.28;
+  const N=14;
+  const wobble=baseR*0.09;
+  // Vertical ellipse (taller than wide)
+  const pts=roughRing(centre.x,centre.y,baseR*0.88,openY,N,wobble,sd);
+  ctx.save();
+  ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); catmull(ctx,pts); ctx.fill();
+  ctx.restore();
+}
+
+// Style 3: 大圆眼 — near-circle, thick ring, pupil + white highlight
+function drawEye3(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const rx=baseR*1.10;
+  const ry=Math.max(1.5,rx*(0.05+blinkCurved*0.95));
+  ctx.save();
+  ctx.strokeStyle='#0a0a0a';
+  ctx.lineWidth=Math.max(3,baseR*0.20);
+  ctx.beginPath(); ctx.ellipse(centre.x,centre.y,rx,ry,0,0,Math.PI*2); ctx.stroke();
+  const pupR=baseR*0.58;
+  const pupY=centre.y-ry*0.12;
+  ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); ctx.ellipse(centre.x,pupY,pupR,pupR*(0.1+blinkCurved*0.9),0,0,Math.PI*2); ctx.fill();
+  if(blinkCurved>0.25){
+    ctx.fillStyle='rgba(255,255,255,0.88)';
+    const hlR=baseR*0.13;
+    ctx.beginPath(); ctx.ellipse(centre.x+baseR*0.24,pupY-pupR*0.28,hlR,hlR*0.75,0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 4: 下垂眼 — outer corner drops (droopy)
+function drawEye4(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const rx=baseR;
+  const ry=Math.max(1.5,baseR*(0.06+blinkCurved*0.78));
+  const isLeft=centre.x<W/2;
+  const drop=baseR*0.22*blinkCurved;
+  const N=12;
+  const pts=[];
+  for(let i=0;i<N;i++){
+    const a=(i/N)*Math.PI*2;
+    const cosA=Math.cos(a);
+    const outerFactor=isLeft?-cosA:cosA;
+    const extraDrop=Math.max(0,outerFactor)*drop;
+    pts.push({x:centre.x+cosA*rx, y:centre.y+Math.sin(a)*ry+extraDrop});
+  }
+  ctx.save(); ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); catmull(ctx,pts); ctx.fill(); ctx.restore();
+}
+
+// Style 5: 吊梢眼 — outer corner lifts (sharp/cool)
+function drawEye5(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const rx=baseR;
+  const ry=Math.max(1.5,baseR*(0.06+blinkCurved*0.78));
+  const isLeft=centre.x<W/2;
+  const lift=baseR*0.22*blinkCurved;
+  const N=12;
+  const pts=[];
+  for(let i=0;i<N;i++){
+    const a=(i/N)*Math.PI*2;
+    const cosA=Math.cos(a);
+    const outerFactor=isLeft?-cosA:cosA;
+    const liftAmt=Math.max(0,outerFactor)*lift;
+    pts.push({x:centre.x+cosA*rx, y:centre.y+Math.sin(a)*ry-liftAmt});
+  }
+  ctx.save(); ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); catmull(ctx,pts); ctx.fill(); ctx.restore();
+}
+
+// Style 6: 眯眯眼 — always-flat ellipse (smiling eyes)
+function drawEye6(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const rx=baseR;
+  // Very thin regardless of blink; gets thinner when more closed
+  const ry=Math.max(1.5,baseR*(0.04+blinkCurved*0.18));
+  ctx.save(); ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); ctx.ellipse(centre.x,centre.y,rx,ry,0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+// Style 7: 水汪汪 — big ellipse + lower waterline arc
+function drawEye7(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const rx=baseR*1.05;
+  const ry=Math.max(1.5,rx*(0.05+blinkCurved*0.95));
+  ctx.save();
+  ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); ctx.ellipse(centre.x,centre.y,rx,ry,0,0,Math.PI*2); ctx.fill();
+  if(blinkCurved>0.28){
+    ctx.strokeStyle='#0a0a0a';
+    ctx.lineWidth=Math.max(1.5,baseR*0.075);
+    ctx.lineCap='round';
+    ctx.beginPath();
+    ctx.arc(centre.x,centre.y+ry*0.22,rx*0.82,0.18,Math.PI-0.18);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Style 8: 双眼皮 — ellipse + parallel lid arc above
+function drawEye8(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const rx=baseR;
+  const ry=Math.max(1.5,baseR*(0.06+blinkCurved*0.82));
+  ctx.save();
+  ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); ctx.ellipse(centre.x,centre.y,rx,ry,0,0,Math.PI*2); ctx.fill();
+  if(blinkCurved>0.18){
+    const lidOffY=ry+baseR*0.14;
+    ctx.strokeStyle='#0a0a0a';
+    ctx.lineWidth=Math.max(1.5,baseR*0.082);
+    ctx.lineCap='round';
+    ctx.beginPath();
+    // arc curves up = upper eyelid crease
+    ctx.arc(centre.x,centre.y+lidOffY,rx*0.90,Math.PI+0.22,-0.22);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Style 9: 猫眼 — flat top straight line, curved bottom
+function drawEye9(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const rx=baseR;
+  const ry=Math.max(1.5,baseR*(0.06+blinkCurved*0.82));
+  const top=centre.y-ry, bot=centre.y+ry;
+  const left=centre.x-rx, right=centre.x+rx;
+  ctx.save(); ctx.fillStyle='#0a0a0a';
+  ctx.beginPath();
+  ctx.moveTo(left,top);
+  ctx.lineTo(right,top);
+  ctx.bezierCurveTo(right,top+ry*0.4, right,bot, centre.x,bot);
+  ctx.bezierCurveTo(left,bot, left,top+ry*0.4, left,top);
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+
+// Style 10: 布偶点眼 — two tiny dots (minimalist)
+function drawEye10(ctx,centre,ring8,baseR,blink){
+  const blinkCurved=Math.pow(Math.max(0,blink),0.70);
+  const dotRx=Math.max(2.5,baseR*0.30);
+  const dotRy=Math.max(1,dotRx*(0.12+blinkCurved*0.88));
+  ctx.save(); ctx.fillStyle='#0a0a0a';
+  ctx.beginPath(); ctx.ellipse(centre.x,centre.y,dotRx,dotRy,0,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  ── MOUTH STYLES 1-10 ──
+// ═══════════════════════════════════════════════════════════════
+
+// Style 1: Classic (original)
+function drawMouth1(ctx,centre,ring8,mwid,MAR,smile,scale,pid){
+  const rcx=ring8.reduce((s,p)=>s+p.x,0)/8;
+  const rcy=ring8.reduce((s,p)=>s+p.y,0)/8;
+  const targetW=mwid*0.52*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  const targetH=targetW*(0.12+openAmt*0.90);
+  const rrx=ring8.reduce((mx,p)=>Math.max(mx,Math.abs(p.x-rcx)),1);
+  const rry=ring8.reduce((mx,p)=>Math.max(mx,Math.abs(p.y-rcy)),1);
+  const pts=ring8.map(p=>({
+    x:centre.x+(p.x-rcx)/rrx*targetW,
+    y:centre.y+(p.y-rcy)/rry*targetH,
+  }));
+  ctx.save();
+  ctx.strokeStyle='#111111'; ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.lineWidth=Math.max(2.8,mwid*0.052*scale);
+  ctx.beginPath(); catmull(ctx,pts); ctx.stroke();
+  ctx.lineWidth=Math.max(1.4,mwid*0.030*scale); ctx.globalAlpha=0.30;
+  const jp=pts.map(p=>({x:p.x+Math.sin(p.y*.18)*1.6,y:p.y+Math.cos(p.x*.18)*1.6}));
+  ctx.beginPath(); catmull(ctx,jp); ctx.stroke();
+  ctx.globalAlpha=1; ctx.restore();
+}
+
+// Style 2: 手绘版 — MAR三段式：细弧线/扁椭圆填充/圆洞填充
+function drawMouth2(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.52*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  const seed=42;
+  ctx.save(); ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#0a0a0a'; ctx.lineCap='round';
+
+  if(MAR<0.08){
+    // 闭嘴：细弧线 stroke only
+    ctx.lineWidth=Math.max(2,mwid*0.038*scale);
+    const arcD=w*0.05;
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w*0.9,centre.y);
+    ctx.bezierCurveTo(centre.x-w*0.3,centre.y+arcD*2,centre.x+w*0.3,centre.y+arcD*2,centre.x+w*0.9,centre.y);
+    ctx.stroke();
+  } else if(MAR<0.22){
+    // 微张：扁填充椭圆
+    const h=w*(0.10+openAmt*0.55);
+    const N=10;
+    const wobble=w*0.035;
+    const pts=roughRing(centre.x,centre.y,w,h,N,wobble,seed);
+    ctx.beginPath(); catmull(ctx,pts); ctx.fill();
+  } else {
+    // 大张：圆填充椭圆/圆洞
+    const h=w*(0.10+openAmt*0.92);
+    const rnd=Math.min(h,w*0.90); // approaches circle when fully open
+    const rW=w*(0.6+openAmt*0.35);
+    const N=12;
+    const wobble=rW*0.06;
+    const pts=roughRing(centre.x,centre.y,rW,h,N,wobble,seed+1);
+    ctx.beginPath(); catmull(ctx,pts); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 3: 猫嘴 — W shape closed, small triangle open
+function drawMouth3(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.48*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  ctx.save();
+  ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#0a0a0a';
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  if(MAR<0.11){
+    // W-shaped cat mouth
+    ctx.lineWidth=Math.max(2,mwid*0.048*scale);
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w,centre.y);
+    ctx.bezierCurveTo(centre.x-w*0.55,centre.y+w*0.14, centre.x-w*0.18,centre.y-w*0.04, centre.x,centre.y+w*0.09);
+    ctx.bezierCurveTo(centre.x+w*0.18,centre.y-w*0.04, centre.x+w*0.55,centre.y+w*0.14, centre.x+w,centre.y);
+    ctx.stroke();
+  } else {
+    // Triangle opening
+    const h=w*(0.28+openAmt*0.72);
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w*0.55,centre.y-h*0.15);
+    ctx.bezierCurveTo(centre.x-w*0.18,centre.y-h*0.28,centre.x+w*0.18,centre.y-h*0.28,centre.x+w*0.55,centre.y-h*0.15);
+    ctx.lineTo(centre.x,centre.y+h*0.85);
+    ctx.closePath(); ctx.fill();
+    // W line above
+    ctx.lineWidth=Math.max(2,mwid*0.048*scale);
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w*0.7,centre.y-h*0.1);
+    ctx.bezierCurveTo(centre.x-w*0.3,centre.y-h*0.35,centre.x-w*0.08,centre.y-h*0.18,centre.x,centre.y-h*0.07);
+    ctx.bezierCurveTo(centre.x+w*0.08,centre.y-h*0.18,centre.x+w*0.3,centre.y-h*0.35,centre.x+w*0.7,centre.y-h*0.1);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Style 4: 嘟嘴 — two thick lip lines closed, circular opening
+function drawMouth4(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.48*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  ctx.save();
+  ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#0a0a0a'; ctx.lineCap='round';
+  if(MAR<0.11){
+    const lw=Math.max(3.5,mwid*0.090*scale);
+    ctx.lineWidth=lw;
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w*0.68,centre.y-lw*0.4);
+    ctx.bezierCurveTo(centre.x-w*0.22,centre.y-lw*1.15,centre.x+w*0.22,centre.y-lw*1.15,centre.x+w*0.68,centre.y-lw*0.4);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w*0.64,centre.y+lw*0.4);
+    ctx.bezierCurveTo(centre.x-w*0.20,centre.y+lw*1.20,centre.x+w*0.20,centre.y+lw*1.20,centre.x+w*0.64,centre.y+lw*0.4);
+    ctx.stroke();
+  } else {
+    const r=w*(0.38+openAmt*0.52);
+    ctx.beginPath(); ctx.ellipse(centre.x,centre.y,r,r*(0.78+openAmt*0.22),0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 5: 微笑嘴 — upward curve closed, oval when open
+function drawMouth5(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.50*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  ctx.save();
+  ctx.strokeStyle='#0a0a0a'; ctx.fillStyle='#0a0a0a'; ctx.lineCap='round';
+  if(MAR<0.10){
+    const curveH=w*0.13;
+    ctx.lineWidth=Math.max(2.5,mwid*0.055*scale);
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w,centre.y);
+    ctx.bezierCurveTo(centre.x-w*0.3,centre.y-curveH*2.2,centre.x+w*0.3,centre.y-curveH*2.2,centre.x+w,centre.y);
+    ctx.stroke();
+    // corner dimple marks
+    ctx.lineWidth=Math.max(1.5,mwid*0.038*scale);
+    for(const sx of[-1,1]){
+      ctx.beginPath();
+      ctx.moveTo(centre.x+sx*w*0.98,centre.y);
+      ctx.lineTo(centre.x+sx*w*0.98,centre.y-curveH*2.8);
+      ctx.stroke();
+    }
+  } else {
+    const h=w*(0.22+openAmt*0.78);
+    ctx.beginPath(); ctx.ellipse(centre.x,centre.y,w*0.82,h,0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 6: 下撇嘴 — downward curve (sulky), round hole open
+function drawMouth6(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.50*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  ctx.save();
+  ctx.strokeStyle='#0a0a0a'; ctx.fillStyle='#0a0a0a'; ctx.lineCap='round';
+  if(MAR<0.10){
+    const curveH=w*0.14;
+    ctx.lineWidth=Math.max(2.5,mwid*0.055*scale);
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w,centre.y);
+    ctx.bezierCurveTo(centre.x-w*0.3,centre.y+curveH*2.2,centre.x+w*0.3,centre.y+curveH*2.2,centre.x+w,centre.y);
+    ctx.stroke();
+  } else {
+    const h=w*(0.28+openAmt*0.72);
+    ctx.beginPath(); ctx.ellipse(centre.x,centre.y+h*0.08,w*0.72,h,0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 7: 厚唇 — two-stroke thick lips closed, big ellipse open
+function drawMouth7(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.50*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  ctx.save();
+  ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#0a0a0a'; ctx.lineCap='round';
+  if(MAR<0.11){
+    const lw=Math.max(5,mwid*0.105*scale);
+    ctx.lineWidth=lw;
+    // upper lip
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w*0.78,centre.y-lw*0.38);
+    ctx.bezierCurveTo(centre.x-w*0.28,centre.y-lw*1.20,centre.x+w*0.28,centre.y-lw*1.20,centre.x+w*0.78,centre.y-lw*0.38);
+    ctx.stroke();
+    // lower lip
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w*0.72,centre.y+lw*0.38);
+    ctx.bezierCurveTo(centre.x-w*0.28,centre.y+lw*1.28,centre.x+w*0.28,centre.y+lw*1.28,centre.x+w*0.72,centre.y+lw*0.38);
+    ctx.stroke();
+    // corner joins
+    ctx.lineWidth=lw*0.75;
+    for(const sx of[-1,1]){
+      ctx.beginPath();
+      ctx.moveTo(centre.x+sx*w*0.78,centre.y-lw*0.38);
+      ctx.lineTo(centre.x+sx*w*0.72,centre.y+lw*0.38);
+      ctx.stroke();
+    }
+  } else {
+    const h=w*(0.32+openAmt*0.68);
+    ctx.beginPath(); ctx.ellipse(centre.x,centre.y,w*0.95,h,0,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 8: 龅牙嘴 — teeth visible when closed, more teeth when open
+function drawMouth8(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.50*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  const toothW=Math.max(5,w*0.22);
+  const toothH=Math.max(5,w*0.22);
+  ctx.save();
+  ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#0a0a0a'; ctx.lineCap='round';
+  if(MAR<0.11){
+    // Closed: line + two white tooth rectangles
+    ctx.lineWidth=Math.max(2,mwid*0.048*scale);
+    ctx.beginPath(); ctx.moveTo(centre.x-w,centre.y); ctx.lineTo(centre.x+w,centre.y); ctx.stroke();
+    // white teeth
+    for(const ox of[-toothW*0.72,toothW*0.72]){
+      ctx.fillStyle='#f8f8f8';
+      ctx.fillRect(centre.x+ox-toothW*0.5,centre.y-toothH,toothW,toothH);
+      ctx.strokeStyle='#222'; ctx.lineWidth=1;
+      ctx.strokeRect(centre.x+ox-toothW*0.5,centre.y-toothH,toothW,toothH);
+    }
+  } else {
+    const h=w*(0.30+openAmt*0.70);
+    ctx.fillStyle='#0a0a0a';
+    ctx.beginPath(); ctx.ellipse(centre.x,centre.y,w,h,0,0,Math.PI*2); ctx.fill();
+    // white teeth row inside
+    ctx.fillStyle='#f8f8f8';
+    const numT=Math.round(2+openAmt*3);
+    const totalTW=Math.min(w*1.55,numT*toothW*1.08);
+    const th=Math.min(toothH*(0.8+openAmt*0.6),h*0.65);
+    for(let t=0;t<numT;t++){
+      const tx=centre.x-totalTW/2+(t+0.5)*(totalTW/numT);
+      ctx.fillRect(tx-toothW*0.38,centre.y-h+3,toothW*0.76,th);
+    }
+  }
+  ctx.restore();
+}
+
+// Style 9: 心形嘴 — M-shaped upper lip closed, heart opening
+function drawMouth9(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.46*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  ctx.save();
+  ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#0a0a0a';
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  if(MAR<0.10){
+    // M-shaped upper lip
+    ctx.lineWidth=Math.max(2,mwid*0.048*scale);
+    ctx.beginPath();
+    ctx.moveTo(centre.x-w,centre.y+w*0.02);
+    ctx.bezierCurveTo(centre.x-w*0.68,centre.y-w*0.20,centre.x-w*0.38,centre.y-w*0.18,centre.x-w*0.08,centre.y-w*0.04);
+    ctx.bezierCurveTo(centre.x-w*0.03,centre.y+w*0.04,centre.x+w*0.03,centre.y+w*0.04,centre.x+w*0.08,centre.y-w*0.04);
+    ctx.bezierCurveTo(centre.x+w*0.38,centre.y-w*0.18,centre.x+w*0.68,centre.y-w*0.20,centre.x+w,centre.y+w*0.02);
+    ctx.stroke();
+  } else {
+    // Heart shape
+    const h=w*(0.45+openAmt*0.55);
+    const hx=centre.x,hy=centre.y;
+    ctx.beginPath();
+    ctx.moveTo(hx,hy+h*0.45);
+    ctx.bezierCurveTo(hx-w*1.05,hy-h*0.48,hx-w*1.05,hy-h*1.18,hx-w*0.38,hy-h*0.76);
+    ctx.bezierCurveTo(hx-w*0.10,hy-h*0.55,hx,hy-h*0.44,hx,hy-h*0.28);
+    ctx.bezierCurveTo(hx,hy-h*0.44,hx+w*0.10,hy-h*0.55,hx+w*0.38,hy-h*0.76);
+    ctx.bezierCurveTo(hx+w*1.05,hy-h*1.18,hx+w*1.05,hy-h*0.48,hx,hy+h*0.45);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Style 10: 鱼嘴 — straight line closed, diamond/rhombus open
+function drawMouth10(ctx,centre,ring8,mwid,MAR,smile,scale){
+  const w=mwid*0.48*scale;
+  const openAmt=Math.max(0,MAR-0.04)*GLOBAL.MOUTH_OPEN_AMP;
+  ctx.save();
+  ctx.fillStyle='#0a0a0a'; ctx.strokeStyle='#0a0a0a'; ctx.lineCap='round';
+  if(MAR<0.09){
+    ctx.lineWidth=Math.max(2,mwid*0.048*scale);
+    ctx.beginPath(); ctx.moveTo(centre.x-w,centre.y); ctx.lineTo(centre.x+w,centre.y); ctx.stroke();
+  } else {
+    const h=w*(0.28+openAmt*0.72);
+    ctx.beginPath();
+    ctx.moveTo(centre.x,centre.y-h);
+    ctx.lineTo(centre.x+w,centre.y);
+    ctx.lineTo(centre.x,centre.y+h);
+    ctx.lineTo(centre.x-w,centre.y);
+    ctx.closePath(); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DEFAULT STATIC FACE (shown before camera starts)
+// ═══════════════════════════════════════════════════════════════
+function drawDefault(){
+  const lx=W*0.36,rx=W*0.64,ey=H*0.41;
+  const mx=W*0.50,my=H*0.58;
+  const er=W*0.058,mr=W*0.10,bY=H*0.345;
+  ctx.strokeStyle='#111'; ctx.lineCap='round'; ctx.lineJoin='round';
+  for(const ex of[lx,rx]){
+    const hw=er*1.2,arch=er*0.18,tilt=er*0.08;
+    ctx.lineWidth=Math.max(3,er*0.22);
+    ctx.beginPath();
+    ctx.moveTo(ex-hw,bY+tilt);
+    ctx.bezierCurveTo(ex-hw/2,bY-arch,ex+hw/2,bY-arch,ex+hw,bY-tilt);
+    ctx.stroke();
+    ctx.save(); ctx.translate(ex,ey);
+    ctx.beginPath(); ctx.ellipse(0,0,er,er,0,0,Math.PI*2);
+    ctx.fillStyle='#111'; ctx.fill();
+    ctx.restore();
+  }
+  ctx.save(); ctx.translate(mx,my);
+  ctx.lineWidth=Math.max(3,mr*0.09);
+  ctx.beginPath(); ctx.ellipse(0,0,mr,mr*0.28,0,0,Math.PI*2); ctx.stroke();
+  ctx.restore();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  DRAG
+// ═══════════════════════════════════════════════════════════════
+function dragStart(px,py){
+  if(!isStarted||!hitTargets.length)return;
+  let best=null, bestD=Infinity;
+  for(const t of hitTargets){
+    const d=Math.hypot(t.cx-px,t.cy-py);
+    if(d<t.r*1.7&&d<bestD){ bestD=d; best=t; }
+  }
+  if(!best){ drag=null; return; }
+  drag=best; dragSX=px; dragSY=py; dragOS={...best.off};
+  $$('dh').classList.add('show');
+}
+function dragMove(px,py){
+  if(!drag)return;
+  const dx=(px-dragSX)/W*100, dy=(py-dragSY)/H*100;
+  drag.off.x=Math.max(-40,Math.min(40,dragOS.x+dx));
+  drag.off.y=Math.max(-40,Math.min(40,dragOS.y+dy));
+  const el0=$$(drag.ids[0]),el1=$$(drag.ids[1]);
+  if(el0)el0.value=drag.off.x;
+  if(el1)el1.value=drag.off.y;
+}
+function dragEnd(){ drag=null; $$('dh').classList.remove('show'); }
+
+canvas.addEventListener('touchstart',e=>dragStart(e.touches[0].clientX,e.touches[0].clientY),{passive:true});
+canvas.addEventListener('touchmove', e=>dragMove( e.touches[0].clientX,e.touches[0].clientY),{passive:true});
+canvas.addEventListener('touchend',  dragEnd);
+canvas.addEventListener('mousedown', e=>dragStart(e.clientX,e.clientY));
+canvas.addEventListener('mousemove', e=>{if(drag)dragMove(e.clientX,e.clientY);});
+canvas.addEventListener('mouseup',   dragEnd);
+
+// ═══════════════════════════════════════════════════════════════
+//  RECORDING
+// ═══════════════════════════════════════════════════════════════
+const REC_FPS=25, REC_INTERVAL=1000/REC_FPS;
+
+function buildRecCanvas(){
+  if(recCanvas)return;
+  recCanvas=document.createElement('canvas');
+  recCanvas.width=canvas.width||window.innerWidth;
+  recCanvas.height=canvas.height||window.innerHeight;
+  recCtx2=recCanvas.getContext('2d');
+}
+
+function startRec(){
+  recChunks=[];
+  buildRecCanvas();
+  recCanvas.width=canvas.width; recCanvas.height=canvas.height;
+  let recStream;
+  if(audioStream&&audioStream.getAudioTracks().length>0){
+    recStream=audioStream.clone();
+    const vt=recCanvas.captureStream(0).getVideoTracks()[0];
+    if(vt)recStream.addTrack(vt);
+  } else {
+    recStream=recCanvas.captureStream(0);
+  }
+  const mimes=[
+    'video/mp4;codecs="avc1.42E01E,mp4a.40.2"','video/mp4',
+    'video/webm;codecs="vp9,opus"','video/webm;codecs=vp8,opus','video/webm',
+  ];
+  const mime=mimes.find(m=>{try{return MediaRecorder.isTypeSupported(m);}catch{return false;}})||'video/webm';
+  mediaRecorder=new MediaRecorder(recStream,{mimeType:mime,videoBitsPerSecond:1_500_000});
+  mediaRecorder.ondataavailable=e=>{if(e.data?.size>0)recChunks.push(e.data);};
+  mediaRecorder.onstop=finishRec;
+  mediaRecorder.start(500);
+  let lastFrameTime=0;
+  let recVideoTrack=recStream.getVideoTracks()[0];
+  function rafPump(now){
+    if(!isRecording)return;
+    if(now-lastFrameTime>=REC_INTERVAL){
+      lastFrameTime=now;
+      recCtx2.drawImage(canvas,0,0);
+      if(recVideoTrack&&typeof recVideoTrack.requestFrame==='function') recVideoTrack.requestFrame();
+    }
+    recPumpId=requestAnimationFrame(rafPump);
+  }
+  recPumpId=requestAnimationFrame(rafPump);
+  isRecording=true; recStart=Date.now();
+  recTmr=setInterval(()=>{
+    const s=Math.floor((Date.now()-recStart)/1000);
+    $$('rtime').textContent=`⏺ ${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  },500);
+  $$('rtime').classList.add('show');
+  setSt('录制中…','rec');
+  $$('btnRec').textContent='⏹ 停止'; $$('btnRec').classList.add('stop');
+  toast('🔴 录制中'+(audioStream?'（含麦克风）':'（无麦克风）'));
+}
+
+function stopRec(){
+  isRecording=false;
+  if(recPumpId){cancelAnimationFrame(recPumpId);recPumpId=null;}
+  clearInterval(recTmr);
+  $$('rtime').classList.remove('show');
+  setSt('处理中…','');
+  $$('btnRec').textContent='⏺ 录制'; $$('btnRec').classList.remove('stop');
+  if(mediaRecorder&&mediaRecorder.state==='recording') mediaRecorder.requestData();
+  setTimeout(()=>{ mediaRecorder?.stop(); },120);
+}
+
+function finishRec(){
+  setSt('追踪中','ok');
+  const mime=mediaRecorder?.mimeType||'video/webm';
+  const ext=mime.includes('mp4')?'mp4':'webm';
+  const blob=new Blob(recChunks,{type:mime});
+  if(lastBlob)URL.revokeObjectURL(lastBlob);
+  lastBlob=URL.createObjectURL(blob);
+  const dl=$$('btnDl');
+  dl.dataset.url=lastBlob; dl.dataset.ext=ext; dl.textContent='⬇️ 下载'; dl.disabled=false;
+  $$('btnDlV').style.display='none';
+  toast(`✅ 录制完成 (${ext.toUpperCase()})，点击下载`);
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  UI HELPERS
+// ═══════════════════════════════════════════════════════════════
+function setSt(t,c){ $$('slbl').textContent=t; $$('sdot').className='sdot'+(c?' '+c:''); }
+let toastT;
+function toast(m){
+  const e=$$('toast'); e.textContent=m; e.classList.add('show');
+  clearTimeout(toastT); toastT=setTimeout(()=>e.classList.remove('show'),3200);
+}
+function $$(id){ return document.getElementById(id); }
+
+// ═══════════════════════════════════════════════════════════════
+//  EVENT WIRING
+// ═══════════════════════════════════════════════════════════════
+$$('uiHandle').addEventListener('click',()=>$$('ui').classList.toggle('collapsed'));
+$$('btnCam').addEventListener('click',startCam);
+$$('btnRec').addEventListener('click',()=>{ if(!isStarted)return; isRecording?stopRec():startRec(); });
+$$('btnDl').addEventListener('click',()=>{
+  const dl=$$('btnDl'); if(!dl.dataset.url)return;
+  const a=document.createElement('a'); a.href=dl.dataset.url;
+  a.download=`greenface-${Date.now()}.${dl.dataset.ext||'mp4'}`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+});
+$$('btnDlV').addEventListener('click',()=>{});
+
+// Feature selector buttons
+$$('browPrev').addEventListener('click', ()=>stepStyle('brow',-1));
+$$('browNext').addEventListener('click', ()=>stepStyle('brow',+1));
+$$('eyePrev').addEventListener('click',  ()=>stepStyle('eye', -1));
+$$('eyeNext').addEventListener('click',  ()=>stepStyle('eye', +1));
+$$('mouthPrev').addEventListener('click',()=>stepStyle('mouth',-1));
+$$('mouthNext').addEventListener('click',()=>stepStyle('mouth',+1));
+
+// Background color
+$$('colorRow').addEventListener('click',e=>{
+  const sw=e.target.closest('.sw'); if(!sw)return;
+  document.querySelectorAll('.sw').forEach(s=>s.classList.remove('on'));
+  sw.classList.add('on'); GLOBAL.bgColor=sw.dataset.c;
+});
+$$('cpick').addEventListener('input',e=>{
+  GLOBAL.bgColor=e.target.value;
+  document.querySelectorAll('.sw').forEach(s=>s.classList.remove('on'));
+});
+
+// Size & position sliders
+[0].forEach(pid=>{
+  const cfg=PCFG[pid];
+  $$(`p${pid}bszS`).addEventListener('input',e=>{
+    cfg.browScale=e.target.value/10; $$(`p${pid}bszL`).textContent=cfg.browScale.toFixed(1)+'x';});
+  $$(`p${pid}eszS`).addEventListener('input',e=>{
+    cfg.eyeScale=e.target.value/12; $$(`p${pid}eszL`).textContent=cfg.eyeScale.toFixed(1)+'x';});
+  $$(`p${pid}mszS`).addEventListener('input',e=>{
+    cfg.mouthScale=e.target.value/10; $$(`p${pid}mszL`).textContent=cfg.mouthScale.toFixed(1)+'x';});
+  const posMap=[
+    [`p${pid}lbX`,cfg.lbOff,'x'],[`p${pid}lbY`,cfg.lbOff,'y'],
+    [`p${pid}leX`,cfg.leOff,'x'],[`p${pid}leY`,cfg.leOff,'y'],
+    [`p${pid}mX`, cfg.mOff, 'x'],[`p${pid}mY`, cfg.mOff, 'y'],
+    [`p${pid}reX`,cfg.reOff,'x'],[`p${pid}reY`,cfg.reOff,'y'],
+    [`p${pid}rbX`,cfg.rbOff,'x'],[`p${pid}rbY`,cfg.rbOff,'y'],
+  ];
+  posMap.forEach(([id,obj,ax])=>{
+    $$(id).addEventListener('input',e=>{obj[ax]=parseFloat(e.target.value);});
+  });
+  $$(`p${pid}reset`).addEventListener('click',()=>{
+    Object.assign(cfg.lbOff,{x:0,y:0}); Object.assign(cfg.leOff,{x:0,y:0});
+    Object.assign(cfg.mOff, {x:0,y:0}); Object.assign(cfg.reOff,{x:0,y:0});
+    Object.assign(cfg.rbOff,{x:0,y:0});
+    [`p${pid}lbX`,`p${pid}lbY`,`p${pid}leX`,`p${pid}leY`,
+     `p${pid}mX`,`p${pid}mY`,`p${pid}reX`,`p${pid}reY`,
+     `p${pid}rbX`,`p${pid}rbY`].forEach(id=>{const el=$$(id);if(el)el.value=0;});
+    toast(`↺ 位置已重置`);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════════════
+resize();
+updateFeatUI();
+ctx.fillStyle=GLOBAL.bgColor; ctx.fillRect(0,0,W,H); drawDefault();
+initMP().catch(e=>{$$('ldMsg').textContent='❌ 加载失败: '+e.message; console.error(e);});
+</script>
+</body>
+</html>
