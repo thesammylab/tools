@@ -12,11 +12,11 @@ Website: https://www.sammylab.com
 
 ## Tools
 
-| Tool | What it does | Status |
-|------|--------------|--------|
-| [face-swap](./face-swap) | Real-time AR face replacement with expressive cartoon features. Works in browser, single HTML file. | Live |
+| Tool | What it does | Try it | Status |
+|------|--------------|--------|--------|
+| [face-swap](./face-swap) | Real-time AR face replacement with expressive cartoon features. Works in browser, single HTML file. | [Live demo ↗](https://thesammylab.github.io/tools/face-swap/) | ✅ Live |
 
-More coming soon.
+*More coming soon.*
 
 ---
 
