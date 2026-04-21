@@ -6,6 +6,8 @@ Single HTML file. No build step. Just open it in a browser. Mobile browser bette
 
 ---
 
+![Face-swap demo](./bigreenface.jpg)
+
 ## Features
 
 - Dual-person face replacement — detect and swap two faces simultaneously
